@@ -1,1 +1,2 @@
 # motokurye-sistem
+motokurye AI
