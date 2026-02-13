@@ -1,604 +1,387 @@
-Okay, here's the architectural design for the Motokurye Delivery System, focusing on User Registration, Login, and JWT-based Authentication, according to the provided user stories.
+Okay, let's design the architecture for user login and registration with JWT for the Motokurye Delivery System based on the provided user story and acceptance criteria.
 
-**1. Database Schema (PostgreSQL)**
+**I. Project Structure (Maven)**
+
+```
+motokurye-delivery-system/
+├── pom.xml
+└── src/
+    ├── main/
+    │   ├── java/
+    │   │   └── com/
+    │   │       └── motokurye/
+    │   │           └── delivery/
+    │   │               ├── MotokuryeDeliverySystemApplication.java (Main application class)
+    │   │               ├── config/
+    │   │               │   ├── SecurityConfig.java (Spring Security configuration)
+    │   │               │   ├── JwtConfig.java (JWT specific configuration)
+    │   │               ├── controller/
+    │   │               │   ├── AuthenticationController.java (Handles login/registration endpoints)
+    │   │               │   ├── UserController.java (Example protected endpoint)
+    │   │               ├── dto/
+    │   │               │   ├── RegisterRequest.java (Registration DTO)
+    │   │               │   ├── LoginRequest.java (Login DTO)
+    │   │               │   ├── AuthenticationResponse.java (JWT response DTO)
+    │   │               │   ├── UserDTO.java (DTO for returning User information)
+    │   │               ├── entity/
+    │   │               │   ├── User.java (User entity)
+    │   │               ├── enums/
+    │   │               │   ├── Role.java (Enum for user roles)
+    │   │               ├── exception/
+    │   │               │   ├── GlobalExceptionHandler.java (Handles exceptions)
+    │   │               │   ├── UserAlreadyExistsException.java
+    │   │               │   ├── InvalidCredentialsException.java
+    │   │               ├── filter/
+    │   │               │   ├── JwtAuthenticationFilter.java (Validates JWTs)
+    │   │               ├── repository/
+    │   │               │   ├── UserRepository.java (Database access for users)
+    │   │               ├── service/
+    │   │               │   ├── AuthenticationService.java (Business logic for auth)
+    │   │               │   ├── UserService.java (Business logic for user operations)
+    │   │               │   ├── JwtService.java (JWT token generation/validation)
+    │   │               └── util/
+    │   │                   └── PasswordUtils.java (Password hashing utility)
+    │   └── resources/
+    │       ├── application.properties (or application.yml)
+    │       └── db/migration/ (Flyway or Liquibase migrations)
+    └── test/
+        └── java/
+            └── com/
+                └── motokurye/
+                    └── delivery/
+                        ├── AuthenticationControllerTest.java
+                        ├── UserRepositoryTest.java
+                        └── ...
+```
+
+**II. Database Schema (PostgreSQL)**
 
 ```sql
-CREATE TABLE customer (
+CREATE TYPE user_role AS ENUM ('customer', 'courier', 'admin');
+
+CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(50) NOT NULL,
-    surname VARCHAR(50) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,  -- Hashed password
-    phone_number VARCHAR(15) NOT NULL,
-    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT (NOW() at time zone 'utc')
+    email VARCHAR(255) UNIQUE NULL,
+    phone_number VARCHAR(20) UNIQUE NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role user_role NOT NULL,
+    license_plate VARCHAR(20) NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT email_or_phone CHECK (
+        (email IS NOT NULL AND phone_number IS NULL) OR
+        (email IS NULL AND phone_number IS NOT NULL)
+    )
 );
 
-CREATE TABLE courier (
-    id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(50) NOT NULL,
-    surname VARCHAR(50) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,  -- Hashed password
-    phone_number VARCHAR(15) NOT NULL,
-    vehicle_type VARCHAR(50) NOT NULL,  --ENUM('Motorcycle', 'Car', 'Bicycle') or string
-    license_plate VARCHAR(20) NOT NULL,
-    active BOOLEAN NOT NULL DEFAULT FALSE, -- Indicates if the courier is approved/active
-    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT (NOW() at time zone 'utc')
-);
+CREATE INDEX idx_users_email ON users (email);
+CREATE INDEX idx_users_phone_number ON users (phone_number);
+CREATE INDEX idx_users_role ON users (role);
 
--- Consider a separate table for user roles if more roles are needed in the future
-CREATE TABLE role (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(50) UNIQUE NOT NULL
-);
 
-CREATE TABLE user_role (
-    user_id BIGINT NOT NULL,
-    role_id INTEGER NOT NULL,
-    user_type VARCHAR(10) NOT NULL, -- 'customer' or 'courier'
-    PRIMARY KEY (user_id, role_id, user_type),
-    CONSTRAINT fk_user_role_customer
-      FOREIGN KEY(user_id) REFERENCES customer(id),
-    CONSTRAINT fk_user_role_courier
-      FOREIGN KEY(user_id) REFERENCES courier(id),
-    CONSTRAINT fk_user_role_role
-      FOREIGN KEY(role_id) REFERENCES role(id)
-);
+-- Example Migration (using Flyway) - V1__create_users_table.sql
+-- V1 is the version and __create_users_table.sql is the description of the migration.  This will be run automatically by Flyway on startup if the table doesn't exist or if the schema_version table says this migration hasn't been applied.
 
--- Indexes for performance
-CREATE INDEX idx_customer_email ON customer (email);
-CREATE INDEX idx_courier_email ON courier (email);
-
--- Example Roles
-INSERT INTO role (name) VALUES ('customer');
-INSERT INTO role (name) VALUES ('courier');
-INSERT INTO role (name) VALUES ('admin');
 ```
 
-**Explanation:**
-
-*   **customer Table:** Stores customer information.  `email` is unique.
-*   **courier Table:** Stores courier information. `active` flag determines if the courier is approved. `vehicle_type` can be an enum or a string field.
-*   **role Table:** Stores roles.
-*   **user_role Table:** Many-to-many relationship between users (customer/courier) and roles.  This allows for future expansion with different roles (e.g., admin).  The `user_type` column clarifies if the user is a customer or a courier.
-*   **Indexes:**  `idx_customer_email` and `idx_courier_email` indexes speed up user lookups during login.
-
-**2. Java Domain Model (Entities)**
+**III. Java Domain Model (Entities)**
 
 ```java
-// src/main/java/com/motokurye/motokuryedelivery/model
+package com.motokurye.delivery.entity;
 
+import com.motokurye.delivery.enums.Role;
 import jakarta.persistence.*;
 import lombok.Data;
-import java.time.LocalDateTime;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "customer")
-@Data
-public class Customer {
+@Table(name = "users")
+@Data // Lombok for getters, setters, equals, hashCode, toString
+public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 50)
-    private String name;
-
-    @Column(nullable = false, length = 50)
-    private String surname;
-
-    @Column(nullable = false, unique = true)
+    @Column(unique = true)
     private String email;
 
-    @Column(nullable = false)
-    private String password;
-
-    @Column(nullable = false, name = "phone_number")
+    @Column(unique = true)
     private String phoneNumber;
 
-    @Column(name = "created_at")
-    private LocalDateTime createdAt;
-}
-```
-
-```java
-// src/main/java/com/motokurye/motokuryedelivery/model
-import jakarta.persistence.*;
-import lombok.Data;
-import java.time.LocalDateTime;
-
-@Entity
-@Table(name = "courier")
-@Data
-public class Courier {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(nullable = false, length = 50)
-    private String name;
-
-    @Column(nullable = false, length = 50)
-    private String surname;
-
-    @Column(nullable = false, unique = true)
-    private String email;
-
     @Column(nullable = false)
-    private String password;
+    private String passwordHash;
 
-    @Column(nullable = false, name = "phone_number")
-    private String phoneNumber;
-
-    @Column(nullable = false, name = "vehicle_type")
-    private String vehicleType; // Consider using an enum
-
-    @Column(nullable = false, name = "license_plate")
-    private String licensePlate;
-
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private Boolean active;
-
-    @Column(name = "created_at")
-    private LocalDateTime createdAt;
-
-}
-```
-
-```java
-// src/main/java/com/motokurye/motokuryedelivery/model
-
-import jakarta.persistence.*;
-import lombok.Data;
-import java.util.Set;
-
-@Entity
-@Table(name = "role")
-@Data
-public class Role {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Integer id;
-
-    @Column(nullable = false, unique = true)
-    private String name;
-
-    //Consider many-to-many relationships if required
-    //@ManyToMany(mappedBy = "roles")
-    //private Set<User> users;
-}
-```
-
-```java
-// src/main/java/com/motokurye/motokuryedelivery/model
-
-import jakarta.persistence.*;
-import lombok.Data;
-
-@Entity
-@Table(name = "user_role")
-@Data
-public class UserRole {
-
-    @EmbeddedId
-    private UserRoleId id;
-
-    @ManyToOne
-    @MapsId("userId")
-    @JoinColumn(name = "user_id")
-    private Customer customer; //Can be Customer or Courier. Consider using an interface
-
-    @ManyToOne
-    @MapsId("roleId")
-    @JoinColumn(name = "role_id")
     private Role role;
 
-    @Column(name = "user_type", nullable = false)
-    private String userType; // "customer" or "courier"
+    private String licensePlate; // Only for couriers
+
+    @CreationTimestamp
+    @Column(updatable = false)
+    private OffsetDateTime createdAt;
+
+    @UpdateTimestamp
+    private OffsetDateTime updatedAt;
 }
 ```
 
-```java
-// src/main/java/com/motokurye/motokuryedelivery/model
-
-import jakarta.persistence.Column;
-import jakarta.persistence.Embeddable;
-import lombok.Data;
-
-import java.io.Serializable;
-
-@Embeddable
-@Data
-public class UserRoleId implements Serializable {
-
-    @Column(name = "user_id")
-    private Long userId;
-
-    @Column(name = "role_id")
-    private Integer roleId;
-
-    @Column(name = "user_type")
-    private String userType;
-}
-```
-
-**Explanation:**
-
-*   Uses JPA annotations for entity mapping.
-*   `@Data` (from Lombok) generates getters, setters, `equals()`, `hashCode()`, and `toString()`.
-*   `@Table` specifies the database table name.
-*   `@Column` defines column properties.
-*   `@Id`, `@GeneratedValue` define the primary key and its generation strategy.
-*   `@UniqueConstraint` enforces unique email addresses.
-*   UserRole and UserRoleId are needed for composite primary key.
-
-**3. RESTful API Endpoints & DTOs**
+**IV. RESTful API Endpoints and DTOs**
 
 ```java
-// src/main/java/com/motokurye/motokuryedelivery/dto
+package com.motokurye.delivery.dto;
 
-import jakarta.validation.constraints.*;
 import lombok.Data;
 
 @Data
-public class CustomerRegistrationRequest {
-    @NotBlank(message = "Name is required")
-    @Size(min = 2, max = 50, message = "Name must be between 2 and 50 characters")
-    private String name;
-
-    @NotBlank(message = "Surname is required")
-    @Size(min = 2, max = 50, message = "Surname must be between 2 and 50 characters")
-    private String surname;
-
-    @NotBlank(message = "Email is required")
-    @Email(message = "Invalid email format")
-    private String email;
-
-    @NotBlank(message = "Password is required")
-    @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{8,}$",
-            message = "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character")
+public class RegisterRequest {
+    private String email;       // For customer and admin
+    private String phoneNumber; // For courier
     private String password;
-
-    @NotBlank(message = "Phone number is required")
-    @Pattern(regexp = "^5[0-9]{9}$", message = "Invalid Turkish phone number format")
-    private String phoneNumber;
+    private String role;        // "customer", "courier", "admin"
+    private String licensePlate;  // Only for courier, optional
 }
-```
 
-```java
-// src/main/java/com/motokurye/motokuryedelivery/dto
+package com.motokurye.delivery.dto;
 
-import jakarta.validation.constraints.*;
-import lombok.Data;
-
-@Data
-public class CourierRegistrationRequest {
-    @NotBlank(message = "Name is required")
-    @Size(min = 2, max = 50, message = "Name must be between 2 and 50 characters")
-    private String name;
-
-    @NotBlank(message = "Surname is required")
-    @Size(min = 2, max = 50, message = "Surname must be between 2 and 50 characters")
-    private String surname;
-
-    @NotBlank(message = "Email is required")
-    @Email(message = "Invalid email format")
-    private String email;
-
-    @NotBlank(message = "Password is required")
-    @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{8,}$",
-            message = "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character")
-    private String password;
-
-    @NotBlank(message = "Phone number is required")
-    @Pattern(regexp = "^5[0-9]{9}$", message = "Invalid Turkish phone number format")
-    private String phoneNumber;
-
-    @NotBlank(message = "Vehicle type is required")
-    private String vehicleType; // Or use an enum
-
-    @NotBlank(message = "License plate is required")
-    @Pattern(regexp = "^[A-Z]{1,3} \\d{2,4} [A-Z]{2,3}$", message = "Invalid Turkish license plate format")
-    private String licensePlate;
-}
-```
-
-```java
-// src/main/java/com/motokurye/motokuryedelivery/dto
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
 public class LoginRequest {
-
-    @NotBlank(message = "Email is required")
-    @Email(message = "Invalid email format")
     private String email;
-
-    @NotBlank(message = "Password is required")
+    private String phoneNumber;
     private String password;
 }
-```
 
-```java
-// src/main/java/com/motokurye/motokuryedelivery/dto
+
+package com.motokurye.delivery.dto;
 
 import lombok.Data;
 
 @Data
-public class JwtResponse {
+public class AuthenticationResponse {
     private String token;
-    private String type = "Bearer";
+}
 
-    public JwtResponse(String token) {
-        this.token = token;
-    }
+package com.motokurye.delivery.dto;
+
+import lombok.Data;
+
+@Data
+public class UserDTO {
+    private Long id;
+    private String email;
+    private String phoneNumber;
+    private String role;
+    private String licensePlate;
 }
 ```
 
 ```java
-// src/main/java/com/motokurye/motokuryedelivery/controller
-import com.motokurye.motokuryedelivery.dto.*;
-import com.motokurye.motokuryedelivery.service.AuthService;
+package com.motokurye.delivery.controller;
+
+import com.motokurye.delivery.dto.RegisterRequest;
+import com.motokurye.delivery.dto.LoginRequest;
+import com.motokurye.delivery.dto.AuthenticationResponse;
+import com.motokurye.delivery.service.AuthenticationService;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v1/auth")
-@RequiredArgsConstructor
-public class AuthController {
+@RequestMapping("/api/auth")
+public class AuthenticationController {
 
-    private final AuthService authService;
+    private final AuthenticationService authenticationService;
 
-    @PostMapping("/register/customer")
-    public ResponseEntity<?> registerCustomer(@Valid @RequestBody CustomerRegistrationRequest registrationRequest) {
-        JwtResponse jwtResponse = authService.registerCustomer(registrationRequest);
-        return new ResponseEntity<>(jwtResponse, HttpStatus.CREATED);
+    public AuthenticationController(AuthenticationService authenticationService) {
+        this.authenticationService = authenticationService;
     }
 
-    @PostMapping("/register/courier")
-    public ResponseEntity<?> registerCourier(@Valid @RequestBody CourierRegistrationRequest registrationRequest) {
-        authService.registerCourier(registrationRequest);
-        return new ResponseEntity<>(HttpStatus.CREATED);
+    @PostMapping("/register")
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest registerRequest) {
+        try {
+            UserDTO registeredUser = authenticationService.register(registerRequest);
+            return new ResponseEntity<>(registeredUser, HttpStatus.CREATED);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage()); // Or a more structured error response
+        }
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest) {
-        JwtResponse jwtResponse = authService.login(loginRequest);
-        return ResponseEntity.ok(jwtResponse);
-    }
-}
-```
-
-**API Endpoints:**
-
-*   `POST /api/v1/auth/register/customer`: Registers a new customer.  Returns 201 Created with JWT in body.
-*   `POST /api/v1/auth/register/courier`: Registers a new courier. Returns 201 Created.
-*   `POST /api/v1/auth/login`: Logs in a user (customer or courier). Returns 200 OK with JWT in body.
-
-**DTOs:**
-
-*   `CustomerRegistrationRequest`:  Data transfer object for customer registration. Includes validation annotations.
-*   `CourierRegistrationRequest`: Data transfer object for courier registration. Includes validation annotations.
-*   `LoginRequest`: Data transfer object for login.
-*   `JwtResponse`:  Data transfer object for the JWT token returned upon successful login/registration.
-
-**4. Maven Project Structure**
-
-```
-motokurye-delivery/
-├── pom.xml
-└── src/
-    └── main/
-        ├── java/
-        │   └── com/motokurye/motokuryedelivery/
-        │       ├── MotokuryeDeliveryApplication.java (Main Application Class)
-        │       ├── controller/
-        │       │   └── AuthController.java
-        │       ├── model/
-        │       │   ├── Customer.java
-        │       │   ├── Courier.java
-        │       │   ├── Role.java
-        │       │   ├── UserRole.java
-        │       │   └── UserRoleId.java
-        │       ├── dto/
-        │       │   ├── CustomerRegistrationRequest.java
-        │       │   ├── CourierRegistrationRequest.java
-        │       │   ├── LoginRequest.java
-        │       │   └── JwtResponse.java
-        │       ├── repository/
-        │       │   ├── CustomerRepository.java
-        │       │   ├── CourierRepository.java
-        │       │   ├── RoleRepository.java
-        │       │   └── UserRoleRepository.java
-        │       ├── service/
-        │       │   ├── AuthService.java
-        │       │   └── JwtService.java
-        │       ├── config/
-        │       │   ├── SecurityConfig.java
-        │       │   └── ApplicationConfig.java
-        │       ├── security/
-        │       │   └── JwtAuthenticationFilter.java
-        │       └── exception/
-        │           ├── GlobalExceptionHandler.java
-        │           └── CustomException.java
-        │
-        ├── resources/
-        │   ├── application.properties (or application.yml)
-        │   └── templates/
-        │       └── welcome_email.html
-        │       └── courier_pending_approval_email.html
-        └── test/
-            └── java/
-                └── com/motokurye/motokuryedelivery/
-                    └── AuthControllerIntegrationTest.java
-```
-
-**5. Security (JWT/Spring Security)**
-
-*   **JWT Library:** Use `jjwt` (io.jsonwebtoken:jjwt-api, jjwt-impl, jjwt-jackson) or similar.
-*   **Secret Key:** Store the JWT secret key in a secure environment variable, *not* in the code.
-*   **`JwtService`:** A service class responsible for:
-    *   Generating JWT tokens (using user details: ID, email, roles).
-    *   Validating JWT tokens (verifying signature and expiration).
-    *   Extracting user information from the token.
-*   **`JwtAuthenticationFilter`:** A Spring Security filter that intercepts all requests:
-    1.  Extracts the JWT token from the `Authorization` header.
-    2.  Validates the token using `JwtService`.
-    3.  If the token is valid, sets the authentication context using `SecurityContextHolder`.  This involves creating an `Authentication` object with the user's details and roles.
-*   **`SecurityConfig`:** A Spring Security configuration class:
-    *   Configures the filter chain to use the `JwtAuthenticationFilter`.
-    *   Defines which endpoints are protected and which roles are allowed to access them using `@PreAuthorize` annotations on controllers or methods.
-    *   Configures password encoding (BCrypt).
-*   **Password Hashing:** Use BCryptPasswordEncoder.
-
-**Example `SecurityConfig`:**
-
-```java
-// src/main/java/com/motokurye/motokuryedelivery/config
-
-import com.motokurye.motokuryedelivery.security.JwtAuthenticationFilter;
-import lombok.RequiredArgsConstructor;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.security.authentication.AuthenticationProvider;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
-import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-
-@Configuration
-@EnableWebSecurity
-@RequiredArgsConstructor
-@EnableMethodSecurity
-public class SecurityConfig {
-
-    private final JwtAuthenticationFilter jwtAuthFilter;
-    private final AuthenticationProvider authenticationProvider;
-
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-                .csrf(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests((authorize) -> authorize
-                        .requestMatchers("/api/v1/auth/**").permitAll() // Allow authentication endpoints
-                        .anyRequest().authenticated() // Require authentication for all other endpoints
-                )
-                .sessionManagement((session) -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS) // Stateless session
-                )
-                .authenticationProvider(authenticationProvider)
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-
-        return http.build();
-    }
-}
-```
-
-**Example `JwtAuthenticationFilter`:**
-
-```java
-// src/main/java/com/motokurye/motokuryedelivery/security
-import com.motokurye.motokuryedelivery.service.JwtService;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
-import org.springframework.stereotype.Component;
-import org.springframework.web.filter.OncePerRequestFilter;
-
-import java.io.IOException;
-
-@Component
-@RequiredArgsConstructor
-public class JwtAuthenticationFilter extends OncePerRequestFilter {
-
-    private final JwtService jwtService;
-    private final UserDetailsService userDetailsService;
-
-    @Override
-    protected void doFilterInternal(
-            HttpServletRequest request,
-            HttpServletResponse response,
-            FilterChain filterChain
-    ) throws ServletException, IOException {
-        final String authHeader = request.getHeader("Authorization");
-        final String jwt;
-        final String userEmail;
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            filterChain.doFilter(request, response);
-            return;
+    public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
+        try {
+            AuthenticationResponse response = authenticationService.login(loginRequest);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(e.getMessage()); // Or a more structured error
         }
-        jwt = authHeader.substring(7);
-        userEmail = jwtService.extractUsername(jwt);
-        if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
-            if (jwtService.isTokenValid(jwt, userDetails)) {
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        userDetails,
-                        null,
-                        userDetails.getAuthorities()
-                );
-                authToken.setDetails(
-                        new WebAuthenticationDetailsSource().buildDetails(request)
-                );
-                SecurityContextHolder.getContext().setAuthentication(authToken);
+    }
+}
+```
+
+**V. Security (JWT/Spring Security)**
+
+*   **JwtConfig.java:** Configuration for JWT secret, expiration time, etc.  The secret should be read from environment variables.
+*   **JwtService.java:**  Handles JWT generation and validation using `io.jsonwebtoken`.
+*   **JwtAuthenticationFilter.java:**  A `OncePerRequestFilter` that intercepts requests, validates the JWT from the `Authorization` header, and sets the authentication context in Spring Security.
+*   **SecurityConfig.java:**  Spring Security configuration:
+    *   Configures authentication manager.
+    *   Defines URL patterns that are publicly accessible (e.g., `/api/auth/register`, `/api/auth/login`).
+    *   Defines URL patterns that require authentication and authorization based on roles (e.g., `/api/admin/**` requires `ADMIN` role).
+    *   Registers the `JwtAuthenticationFilter` to be used.
+    *   Configures CORS.
+
+**VI. Implementation Details & Considerations**
+
+*   **Password Hashing:** Use `BCryptPasswordEncoder` in Spring Security.  Example:
+
+    ```java
+    import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+
+    @Service
+    public class AuthenticationService {
+
+        private final UserRepository userRepository;
+        private final BCryptPasswordEncoder passwordEncoder;
+
+        public AuthenticationService(UserRepository userRepository, BCryptPasswordEncoder passwordEncoder) {
+            this.userRepository = userRepository;
+            this.passwordEncoder = passwordEncoder;
+        }
+
+        public UserDTO register(RegisterRequest registerRequest) {
+            // ... validation ...
+
+            User user = new User();
+            //... set user properties from registerRequest
+            user.setPasswordHash(passwordEncoder.encode(registerRequest.getPassword()));
+            //...
+
+            User savedUser = userRepository.save(user);
+
+            return convertToDto(savedUser);
+        }
+
+        public AuthenticationResponse login(LoginRequest loginRequest) {
+            //...
+            User user = findUserByEmailOrPhone(loginRequest); //Implement this method in your service.
+            if (user != null && passwordEncoder.matches(loginRequest.getPassword(), user.getPasswordHash())) {
+                //...generate JWT
+            } else {
+                throw new InvalidCredentialsException("Invalid credentials");
             }
+            //...
         }
-        filterChain.doFilter(request, response);
     }
-}
-```
+    ```
 
-**6. Database Indexing**
+*   **Role-Based Authorization:**  Use `@PreAuthorize` annotation in controllers:
 
-*   Indexes on `email` columns in both `customer` and `courier` tables are crucial for fast user lookups during login and registration (to check for duplicate emails).  These are already included in the schema above.
-*   Consider indexing other columns used in frequent queries (e.g., `license_plate` in the `courier` table if you often search by license plate).
+    ```java
+    import org.springframework.security.access.prepost.PreAuthorize;
+    import org.springframework.web.bind.annotation.GetMapping;
+    import org.springframework.web.bind.annotation.RequestMapping;
+    import org.springframework.web.bind.annotation.RestController;
 
-**7. Error Handling**
+    @RestController
+    @RequestMapping("/api/admin")
+    public class AdminController {
 
-*   **Global Exception Handler:**  Create a `@ControllerAdvice` class to handle exceptions globally:
-    *   Catch `MethodArgumentNotValidException` for validation errors and return 400 Bad Request with detailed error messages.
-    *   Catch `DuplicateKeyException` (or similar depending on your database driver) for duplicate email addresses and return 409 Conflict.
-    *   Catch generic `Exception` and log the error, returning 500 Internal Server Error.
-*   **Specific Exception Handling:**  Within the service layer, catch exceptions related to database operations or sending emails and handle them appropriately (e.g., log the email sending failure).
+        @GetMapping("/dashboard")
+        @PreAuthorize("hasRole('ADMIN')")
+        public String adminDashboard() {
+            return "Admin Dashboard";
+        }
+    }
+    ```
 
-**8. Email Sending**
+*   **Error Handling:** Implement `GlobalExceptionHandler` to handle exceptions like `UserAlreadyExistsException`, `AuthenticationException`, `AccessDeniedException`, `InvalidCredentialsException`. Return consistent JSON error responses.  Example:
 
-*   Use Spring's `JavaMailSender` to send emails.
-*   Use a templating engine (e.g., Thymeleaf) to create dynamic email content from HTML templates.
-*   Configure email sending properties in `application.properties` (or `application.yml`).
-*   Email sending should be asynchronous (e.g., using `@Async`) to avoid blocking the main thread.  Log any email sending failures.
+    ```java
+    import org.springframework.http.HttpStatus;
+    import org.springframework.http.ResponseEntity;
+    import org.springframework.web.bind.annotation.ControllerAdvice;
+    import org.springframework.web.bind.annotation.ExceptionHandler;
 
-**9. Validation**
+    @ControllerAdvice
+    public class GlobalExceptionHandler {
 
-*   Use `@Valid` annotation with DTOs to trigger validation.
-*   Use validation annotations from `jakarta.validation.constraints` (e.g., `@NotBlank`, `@Email`, `@Size`, `@Pattern`).
-*   Implement custom validators if needed for more complex validation rules.
+        @ExceptionHandler(UserAlreadyExistsException.class)
+        public ResponseEntity<String> handleUserAlreadyExistsException(UserAlreadyExistsException ex) {
+            return new ResponseEntity<>(ex.getMessage(), HttpStatus.CONFLICT);
+        }
 
-**10. Considerations for Scalability and Robustness**
+        @ExceptionHandler(InvalidCredentialsException.class)
+        public ResponseEntity<String> handleInvalidCredentialsException(InvalidCredentialsException ex) {
+            return new ResponseEntity<>(ex.getMessage(), HttpStatus.UNAUTHORIZED);
+        }
 
-*   **Statelessness:**  JWT-based authentication inherently supports statelessness, which is essential for scalability.
-*   **Database Connection Pooling:**  Use a connection pool (e.g., HikariCP) to efficiently manage database connections.
-*   **Caching:** Cache frequently accessed data (e.g., user roles) to reduce database load.
-*   **Load Balancing:**  Distribute traffic across multiple instances of the application.
-*   **Monitoring and Logging:**  Implement comprehensive monitoring and logging to detect and diagnose issues.
-*   **Externalized Configuration:**  Use environment variables or a configuration server (e.g., Spring Cloud Config) to externalize configuration.
-*   **Asynchronous Operations:**  Use asynchronous operations (e.g., with `@Async` or message queues) for long-running tasks like sending emails.
+        // Add other exception handlers as needed
+    }
+    ```
 
-This architecture provides a solid foundation for building the Motokurye Delivery System's user registration, login, and authentication features.  Remember to adapt it to your specific needs and constraints.  Good luck!
+*   **Input Validation:** Use `@Valid` annotation and `javax.validation` annotations in DTOs.
+
+    ```java
+    import jakarta.validation.constraints.Email;
+    import jakarta.validation.constraints.NotBlank;
+    import jakarta.validation.constraints.Size;
+    import lombok.Data;
+
+    @Data
+    public class RegisterRequest {
+
+        @Email(message = "Invalid email format")
+        private String email;
+
+        @NotBlank(message = "Password is required")
+        @Size(min = 8, message = "Password must be at least 8 characters long")
+        private String password;
+
+        //... other fields
+    }
+    ```
+
+*   **Database Indexing:**  Indexes on `email`, `phone_number`, and `role` columns in the `users` table for faster lookups.
+
+*   **Logging:**  Use SLF4J for logging authentication events, errors, and security-related information.
+
+*   **Refresh Token (basic):**
+
+    1.  Store the refresh token in a secure (HttpOnly) cookie or in the database (linked to the user).  Storing in a cookie mitigates XSS attacks.  Storing in the database allows for easy revocation.
+    2.  Create a `/refresh-token` endpoint.
+    3.  Upon receiving a request to `/refresh-token`:
+        *   Validate the refresh token.
+        *   If valid, generate a new JWT and a new refresh token.
+        *   Return the new JWT and refresh token.
+
+*   **Refresh Token Rotation (advanced):**
+    1. When a user logs in, generate an access token and a refresh token.  Store the refresh token securely (e.g., in a database or a secure cookie).
+    2.  When the access token expires, the client sends the refresh token to the `/refresh` endpoint.
+    3.  The server validates the refresh token.
+    4.  If the refresh token is valid:
+        *   The server generates a *new* refresh token and a new access token.
+        *   The *old* refresh token is invalidated (e.g., by deleting it from the database or adding it to a blacklist).
+        *   The new refresh token is stored securely.
+    5.  The new access token and refresh token are returned to the client.
+
+    This approach prevents refresh token theft from being useful for more than one access token.  If a refresh token is stolen and used, the legitimate user's next refresh request will invalidate the stolen token, effectively mitigating the attack.
+
+*   **Account Locking:** Implement a mechanism to lock accounts after a certain number of failed login attempts (store the number of failed attempts and a timestamp in the database).
+
+*   **CORS Configuration:**  Properly configure CORS to allow requests from your frontend application's origin.
+
+*   **Environment Variables:** Store sensitive information like the JWT secret key and database credentials in environment variables.
+
+*   **Testing:** Write unit tests for individual components (services, filters) and integration tests for the entire authentication flow.
+
+This architecture provides a solid foundation for building a secure and scalable authentication system for the Motokurye Delivery System.  Remember to adapt and refine it based on your specific requirements and constraints.
