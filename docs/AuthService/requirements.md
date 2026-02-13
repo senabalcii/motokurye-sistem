@@ -1,139 +1,93 @@
-Okay, here are the user story requirements for User Login and Registration with JWT for the Motokurye Delivery System, formatted for GitHub Issues.
+Okay, here are the user story and acceptance criteria for user login and registration with JWT (JSON Web Token) for the Motokurye Delivery System.  This focuses on the backend implementation with Java/Spring Boot and PostgreSQL.
 
-**Issue 1: User Registration - Customer**
+**GitHub Issue:**
 
-*   **Title:** As a Customer, I want to register for an account so I can start ordering deliveries.
-*   **Description:**  A customer should be able to register for an account using a form with required fields (name, surname, email, password, phone number).  The system should validate the input and create a new customer record in the database.  Upon successful registration, the customer should receive a welcome email and be automatically logged in.
-*   **Labels:** `customer`, `authentication`, `registration`, `security`, `backend`, `java`, `spring-boot`, `postgresql`
+**Title:** Implement User Login and Registration with JWT Authentication
 
-*   **Acceptance Criteria:**
-    *   [ ] A customer registration endpoint `/api/v1/auth/register/customer` is implemented using POST.
-    *   [ ] The endpoint validates the following fields:
-        *   [ ] `name`: Required, String, minimum 2 characters, maximum 50 characters.
-        *   [ ] `surname`: Required, String, minimum 2 characters, maximum 50 characters.
-        *   [ ] `email`: Required, String, valid email format, unique in the system.
-        *   [ ] `password`: Required, String, minimum 8 characters, must contain at least one uppercase letter, one lowercase letter, one number, and one special character.
-        *   [ ] `phoneNumber`: Required, String, valid Turkish phone number format (e.g., 5XXXXXXXXX).
-    *   [ ] Password hashing is implemented using a strong algorithm (e.g., BCrypt).
-    *   [ ] A `Customer` entity is created in the database upon successful validation and hashing.
-    *   [ ] A welcome email is sent to the registered email address using a template (subject: "Welcome to Motokurye!").  The email should contain the customer's name.
-    *   [ ] The system automatically logs in the user after successful registration, returning a JWT token.
-    *   [ ] The API returns a success response (201 Created) with the JWT token in the response body.
-    *   [ ] Error handling:
-        *   [ ] Return appropriate error codes (400 Bad Request) with informative messages for invalid input.
-        *   [ ] Handle duplicate email addresses (409 Conflict).
-        *   [ ] Handle database connection errors (500 Internal Server Error).
-*   **Edge Cases:**
-    *   Attempting to register with an email address that already exists.
-    *   Submitting a password that does not meet the complexity requirements.
-    *   Submitting a phone number that is not in the correct format.
-    *   Database connection failure during registration.
-    *   Failure to send the welcome email (should be logged but not prevent registration).
-    *   Request body exceeds the allowed size.
+**Description:**
 
-**Issue 2: User Registration - Courier**
+As a developer, I need to implement secure user login and registration functionality, leveraging JWT (JSON Web Token) for authentication and authorization.  This will allow customers, couriers, and admins to access the Motokurye Delivery System with appropriate permissions based on their roles.  This issue encompasses user registration, login, password hashing, JWT generation, and token verification. It should cover error scenarios, input validation, and secure password handling.
 
-*   **Title:** As a Courier, I want to register for an account so I can start accepting delivery requests.
-*   **Description:** A courier should be able to register for an account with required fields (name, surname, email, password, phone number, vehicle type, license plate).  The system should validate the input and create a new courier record in the database. The courier account will be initially set to "inactive" and require admin approval. Upon successful registration, the courier should receive a confirmation email stating that their account is pending approval.
-*   **Labels:** `courier`, `authentication`, `registration`, `security`, `backend`, `java`, `spring-boot`, `postgresql`, `admin-approval`
+**Labels:** `authentication`, `security`, `user management`, `backend`, `java`, `spring-boot`, `jwt`, `database`
 
-*   **Acceptance Criteria:**
-    *   [ ] A courier registration endpoint `/api/v1/auth/register/courier` is implemented using POST.
-    *   [ ] The endpoint validates the following fields:
-        *   [ ] `name`: Required, String, minimum 2 characters, maximum 50 characters.
-        *   [ ] `surname`: Required, String, minimum 2 characters, maximum 50 characters.
-        *   [ ] `email`: Required, String, valid email format, unique in the system.
-        *   [ ] `password`: Required, String, minimum 8 characters, must contain at least one uppercase letter, one lowercase letter, one number, and one special character.
-        *   [ ] `phoneNumber`: Required, String, valid Turkish phone number format (e.g., 5XXXXXXXXX).
-        *   [ ] `vehicleType`: Required, String, enum (e.g., "Motorcycle", "Car", "Bicycle").  Define the valid enum values.
-        *   [ ] `licensePlate`: Required, String, valid Turkish license plate format (e.g., AA 123 BB).
-    *   [ ] Password hashing is implemented using a strong algorithm (e.g., BCrypt).
-    *   [ ] A `Courier` entity is created in the database upon successful validation and hashing. The `active` field is set to `false` by default.
-    *   [ ] A confirmation email is sent to the registered email address using a template (subject: "Motokurye Courier Account Pending Approval"). The email should state that their account is pending administrator approval.
-    *   [ ] The API returns a success response (201 Created).  No JWT token is returned at this stage.
-    *   [ ] Error handling:
-        *   [ ] Return appropriate error codes (400 Bad Request) with informative messages for invalid input.
-        *   [ ] Handle duplicate email addresses (409 Conflict).
-        *   [ ] Handle database connection errors (500 Internal Server Error).
-*   **Edge Cases:**
-    *   Attempting to register with an email address that already exists.
-    *   Submitting a password that does not meet the complexity requirements.
-    *   Submitting a phone number that is not in the correct format.
-    *   Invalid vehicle type.
-    *   Invalid license plate format.
-    *   Database connection failure during registration.
-    *   Failure to send the confirmation email (should be logged but not prevent registration).
-    *   Request body exceeds the allowed size.
+**User Story:**
 
-**Issue 3: User Login**
+*   As a **customer**, I want to be able to register for an account using my email and password so that I can place delivery orders.
+*   As a **courier**, I want to be able to register for an account using my phone number and license plate so that I can accept and fulfill delivery orders.
+*   As an **admin**, I want to be able to register for an account using an email and password so that I can manage the system.
+*   As a **user (customer, courier, or admin)**, I want to be able to log in to the system using my credentials so that I can access the features relevant to my role.
+*   As a **developer**, I want the system to securely store user credentials (passwords) so that they are protected from unauthorized access.
+*   As a **developer**, I want the system to use JWT for authentication and authorization so that access to resources is controlled based on user roles and permissions.
+*   As a **developer**, I want the system to handle invalid login attempts and registration errors gracefully so that users receive informative feedback.
 
-*   **Title:** As a Customer or Courier, I want to log in to the system using my credentials so I can access its features.
-*   **Description:**  Registered users (both Customers and Couriers) should be able to log in using their email and password.  The system should authenticate the user and return a JWT token for authorization.
-*   **Labels:** `customer`, `courier`, `authentication`, `login`, `security`, `backend`, `java`, `spring-boot`, `postgresql`, `jwt`
+**Acceptance Criteria:**
 
-*   **Acceptance Criteria:**
-    *   [ ] A login endpoint `/api/v1/auth/login` is implemented using POST.
-    *   [ ] The endpoint accepts a JSON payload with `email` and `password` fields.
-    *   [ ] The endpoint validates the presence of `email` and `password` fields.
-    *   [ ] The system retrieves the user (Customer or Courier) based on the provided email.
-    *   [ ] The system verifies the provided password against the stored hashed password.
-    *   [ ] If authentication is successful:
-        *   [ ] A JWT token is generated for the user. The token should include the user's ID, role (customer/courier), and email address.
-        *   [ ] The API returns a success response (200 OK) with the JWT token in the response body.
-    *   [ ] If authentication fails:
-        *   [ ] The API returns an error response (401 Unauthorized) with an appropriate error message (e.g., "Invalid credentials").
-    *   [ ] Courier accounts must be active to successfully login. Inactive accounts get a 403 Forbidden.
-    *   [ ] Error handling:
-        *   [ ] Handle the case where the user is not found (401 Unauthorized).
-        *   [ ] Handle incorrect password (401 Unauthorized).
-        *   [ ] Handle database connection errors (500 Internal Server Error).
+- [ ] **Registration Endpoint:**
+    - [ ] Implement a `/register` endpoint that accepts user registration data (email/phone, password, role).
+    - [ ] Validate user input:
+        - [ ] Email format (for customer and admin)
+        - [ ] Phone number format (for courier)
+        - [ ] Password strength (minimum length, complexity)
+        - [ ] License plate format (for courier)
+    - [ ] Check for existing users with the same email (customer, admin) or phone number (courier). Return an appropriate error message if a user already exists.
+    - [ ] Hash the user's password using a strong hashing algorithm (e.g., bcrypt) before storing it in the database.
+    - [ ] Store the user information (including the hashed password and role) in the `users` table.
+    - [ ] Return a success response (HTTP 201 Created) upon successful registration.  Include basic user information (without sensitive data like password) in the response.
+    - [ ] Handle database connection errors gracefully.
+- [ ] **Login Endpoint:**
+    - [ ] Implement a `/login` endpoint that accepts user credentials (email/phone and password).
+    - [ ] Retrieve the user from the database based on the provided email or phone number.
+    - [ ] Verify the provided password against the hashed password stored in the database using the same hashing algorithm.
+    - [ ] If authentication is successful:
+        - [ ] Generate a JWT containing:
+            - [ ] User ID
+            - [ ] User Role (customer, courier, admin)
+            - [ ] Issue Time
+            - [ ] Expiration Time (short-lived, e.g., 15 minutes)
+        - [ ] Return the JWT in the response body (HTTP 200 OK).
+    - [ ] If authentication fails:
+        - [ ] Return an appropriate error message (e.g., "Invalid credentials") and HTTP status code (e.g., 401 Unauthorized).
+    - [ ] Implement a refresh token mechanism to allow users to refresh their JWT token without re-entering their credentials.
+    - [ ]  Handle account locking after multiple failed login attempts (optional for initial implementation, but recommended).
+- [ ] **JWT Configuration:**
+    - [ ] Define a secret key for signing JWTs. **This key MUST be stored securely (e.g., in environment variables or a dedicated secrets management system) and NOT hardcoded in the application.**
+    - [ ] Configure JWT expiration time.
+    - [ ] Implement a filter or interceptor to validate the JWT on protected endpoints.
+        - [ ] Check for the presence of the JWT in the `Authorization` header (e.g., `Bearer <token>`).
+        - [ ] Verify the JWT's signature using the secret key.
+        - [ ] Extract user information (user ID, role) from the JWT's payload.
+        - [ ] If the JWT is invalid or expired, return an appropriate error message (e.g., "Invalid token" or "Token expired") and HTTP status code (e.g., 401 Unauthorized).
+        - [ ] Set the user's authentication context (e.g., using `SecurityContextHolder` in Spring Security) so that the application knows which user is making the request.
+- [ ] **Role-Based Authorization:**
+    - [ ] Implement role-based authorization to restrict access to certain endpoints based on the user's role (customer, courier, admin).  This can be achieved using Spring Security annotations (e.g., `@PreAuthorize("hasRole('CUSTOMER')")`).
+    - [ ] Define the roles and their corresponding permissions in the application's configuration.
+    - [ ] Ensure that unauthorized users are denied access to protected endpoints and receive an appropriate error message (e.g., "Forbidden" or "Unauthorized") and HTTP status code (e.g., 403 Forbidden).
+- [ ] **Error Handling:**
+    - [ ] Implement global exception handling to catch exceptions related to authentication and authorization (e.g., `AuthenticationException`, `AccessDeniedException`).
+    - [ ] Return consistent and informative error messages in a standardized format (e.g., JSON).
+    - [ ] Log all authentication and authorization errors for auditing and debugging purposes.
+- [ ] **Database Schema Considerations:**
+    - [ ] The `users` table should include the following columns:
+        - [ ] `id` (BIGSERIAL, primary key)
+        - [ ] `email` (VARCHAR, unique, nullable for couriers)
+        - [ ] `phone_number` (VARCHAR, unique, nullable for customers and admins)
+        - [ ] `password_hash` (VARCHAR, stores the hashed password)
+        - [ ] `role` (ENUM: `customer`, `courier`, `admin`)
+        - [ ] `license_plate` (VARCHAR, nullable, only for couriers)
+        - [ ] `created_at` (TIMESTAMP WITH TIME ZONE, default: `now()`)
+        - [ ] `updated_at` (TIMESTAMP WITH TIME ZONE, default: `now()`)
 
-*   **Edge Cases:**
-    *   Invalid email address format.
-    *   Incorrect password.
-    *   User account does not exist.
-    *   User account is locked (future feature - for too many failed login attempts).
-    *   Database connection failure during authentication.
-    *   Expired JWT token (covered in token refresh functionality).
-    *   Courier account is not yet approved (inactive).
+**Edge Cases / Considerations:**
 
-**Issue 4: JWT Token Handling and Validation**
+*   **Password Reset:**  A separate user story should cover password reset functionality (email verification, token generation, etc.).
+*   **Account Verification:**  Consider adding email/phone verification steps during registration to ensure the user provides valid contact information.
+*   **Rate Limiting:** Implement rate limiting on the login endpoint to prevent brute-force attacks.
+*   **Security Headers:**  Include appropriate security headers in the responses (e.g., `X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security`).
+*   **Session Management:** While JWTs are stateless, you might want to implement a mechanism to revoke tokens (e.g., store revoked token IDs in a blacklist).
+*   **Refresh Token Rotation:** Implement refresh token rotation for enhanced security.  Each time a refresh token is used, a new refresh token is issued, and the old refresh token is invalidated.
+*   **GDPR Compliance:**  Consider data privacy regulations (like GDPR) when handling user data.
+*   **Testing:**  Write thorough unit and integration tests to cover all aspects of the authentication and authorization functionality.  Include tests for successful login, failed login, registration errors, JWT validation, and role-based access control.
+*   **Scalability:** Consider the scalability of the authentication system, especially if you anticipate a large number of users. Caching and database optimization may be necessary.
+*   **Observability:** Implement proper logging and monitoring to track authentication events and detect potential security issues.
 
-*   **Title:** The system should implement JWT token handling for authentication and authorization.
-*   **Description:**  The system must correctly generate, validate, and use JWT tokens for securing API endpoints.  This includes setting the token expiration time and ensuring that only authorized users can access specific resources.
-*   **Labels:** `security`, `authentication`, `jwt`, `backend`, `java`, `spring-boot`, `postgresql`
-
-*   **Acceptance Criteria:**
-    *   [ ] A JWT library (e.g., `jjwt`) is integrated into the project.
-    *   [ ] The system generates JWT tokens upon successful login and registration (customer).
-    *   [ ] The JWT token contains the following claims:
-        *   [ ] `userId`: The ID of the user.
-        *   [ ] `email`: The email address of the user.
-        *   [ ] `role`: The role of the user (e.g., "customer", "courier").
-        *   [ ] `iat`: Issued at timestamp.
-        *   [ ] `exp`: Expiration timestamp.
-    *   [ ] The JWT token is signed using a secure secret key.  The secret key should be stored securely (e.g., in environment variables or a dedicated secrets management system).
-    *   [ ] The token expiration time is configured (e.g., 1 hour).
-    *   [ ] An authentication filter/interceptor is implemented to intercept all incoming requests.
-    *   [ ] The filter/interceptor extracts the JWT token from the `Authorization` header (e.g., `Authorization: Bearer <token>`).
-    *   [ ] The filter/interceptor validates the JWT token:
-        *   [ ] Checks if the token is present.
-        *   [ ] Verifies the token signature.
-        *   [ ] Checks if the token has expired.
-    *   [ ] If the token is valid, the filter/interceptor sets the user's authentication context (e.g., using `SecurityContextHolder` in Spring Security).  This allows the application to access the user's information (ID, role) in subsequent requests.
-    *   [ ] If the token is invalid or missing, the filter/interceptor returns an error response (401 Unauthorized) with an appropriate error message.
-    *   [ ] Specific API endpoints are secured based on user roles using Spring Security annotations (e.g., `@PreAuthorize("hasRole('customer')")`).
-    *   [ ] Error handling:
-        *   [ ] Handle missing JWT token (401 Unauthorized).
-        *   [ ] Handle invalid JWT signature (401 Unauthorized).
-        *   [ ] Handle expired JWT token (401 Unauthorized).
-
-*   **Edge Cases:**
-    *   Missing `Authorization` header.
-    *   Invalid `Authorization` header format (e.g., missing "Bearer").
-    *   Tampered JWT token.
-    *   Expired JWT token.
-    *   User tries to access a resource they are not authorized to access (e.g., a customer trying to access an admin endpoint).
-    *   Secret key is compromised.
-
-These issues provide a solid foundation for implementing user registration, login, and JWT-based authentication and authorization in your Motokurye Delivery System. Remember to refine these stories further based on your specific requirements and design choices.  Good luck!
+This detailed user story provides a solid foundation for implementing user login and registration with JWT in the Motokurye Delivery System. Remember to break down this large user story into smaller, more manageable tasks during development. Good luck!
